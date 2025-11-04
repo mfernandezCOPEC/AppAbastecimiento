@@ -53,7 +53,7 @@ def _load_all_data():
     # --- Limpieza Global de SKUs (Usando config) ---
     df_consumo['CodigoArticulo'] = df_consumo['CodigoArticulo'].replace(config.MAPEO_SKUS)
     # df_oc['Número de artículo'] = df_oc['Número de artículo'].replace(config.MAPEO_SKUS)
-    # df_stock['CodigoArticulo'] = df_stock['CodigoArticulo'].replace(config.MAPEO_SKUS)
+    df_stock['CodigoArticulo'] = df_stock['CodigoArticulo'].replace(config.MAPEO_SKUS)
     
     print("Datos globales cargados y limpiados.")
     
