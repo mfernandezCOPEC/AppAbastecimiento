@@ -44,7 +44,7 @@ def _load_all_data():
 
     # --- Filtro Global de 4 Meses ---
     hoy = pd.Timestamp.now()
-    hace_4_meses = (hoy - pd.DateOffset(months=4)).replace(day=1) 
+    hace_4_meses = (hoy - pd.DateOffset(months=6)).replace(day=1) # hace 6 meses puse ahora
     
     df_oc = df_oc[df_oc['Fecha de contabilización'] >= hace_4_meses].copy()
     df_oc = df_oc[~df_oc['Comentarios'].str.contains('PROA', na=False)].copy()    
