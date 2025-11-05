@@ -181,13 +181,20 @@ if st.sidebar.button("🚀 Ejecutar Simulación", type="primary"):
             if df_consumo_usado.empty:
                 st.warning("No se encontró historial de consumo para este SKU y bodegas.")
             else:
+                # --- INICIO DE LA MODIFICACIÓN ---
                 # Limpiamos y seleccionamos columnas relevantes para mostrar
                 columnas_a_mostrar = [
                     'FechaSolicitud', 
                     'CantidadSolicitada', 
                     'BodegaDestino_Requerida',
+                    'SolicitadoPor',         # <-- Columna añadida
+                    'CodigoProyecto',         # <-- Columna añadida
+                    'NombreProyecto',         # <-- Columna añadida
+                    'CodigoUnidadNegocio',    # <-- Columna añadida
                     'CeCo' # Este es un supuesto, podría no estar
                 ]
+                # --- FIN DE LA MODIFICACIÓN ---
+                
                 # Filtramos solo columnas que realmente existen en el DataFrame
                 columnas_existentes = [col for col in columnas_a_mostrar if col in df_consumo_usado.columns]
                 
