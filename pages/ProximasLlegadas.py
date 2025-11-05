@@ -1,5 +1,3 @@
-# --- ARCHIVO: pages/2_📦_Llegadas.py ---
-
 import streamlit as st
 import pandas as pd
 import sys
@@ -11,8 +9,8 @@ src_path = str(Path(__file__).resolve().parent.parent / "src")
 if src_path not in sys.path:
     sys.path.append(src_path)
 
-import ui_helpers     # Importa las funciones de gráficos y métricas
-import data_loader    # Importamos esto solo por si acaso, pero los datos ya están cargados
+import ui_helpers      # Importa las funciones de gráficos y métricas
+import data_loader     # Importamos esto solo por si acaso, pero los datos ya están cargados
 
 # --- 1. Título de la Página ---
 st.title("Consulta de Próximas Llegadas 📦")
@@ -39,22 +37,37 @@ opciones_selector_sku, mapa_nombres, _ = ui_helpers.create_sku_options(all_skus,
 # Añadimos la opción "Todas" al selector de SKU
 opciones_con_todas = ["Todas"] + opciones_selector_sku
 
-# Creamos columnas para los filtros
+# (MODIFICADO) Creamos columnas para los filtros en layout 2x2
 col1, col2 = st.columns(2)
+col3, col4 = st.columns(2)
+
 
 with col1:
     sku_seleccionado_formateado = st.selectbox(
         "Filtrar por SKU:",
-        opciones_con_todas, 
+        opciones_con_todas,
         index=0, # Por defecto muestra "Todas"
         help="Seleccione el producto para ver sus Órdenes de Compra futuras."
     )
     sku_seleccionado = sku_seleccionado_formateado.split(" | ")[0]
 
+# --- (NUEVO) Filtro de Nombre de Producto ---
 with col2:
+    nombre_buscado = st.text_input(
+        "Filtrar por Nombre de Producto:",
+        help="Escriba cualquier texto para buscar en el nombre del producto."
+    )
+
+with col3:
     oc_buscada = st.text_input(
         "Filtrar por N° de Orden de Compra (OC):",
         help="Escriba un número de OC para filtrar los resultados (búsqueda parcial)."
+    )
+
+with col4:
+    comentarios_buscados = st.text_input(
+        "Filtrar por Comentarios:",
+        help="Escriba cualquier texto para buscar en la columna 'Comentarios' (búsqueda parcial)."
     )
 
 st.subheader(f"Resultados de la Búsqueda")
@@ -72,14 +85,24 @@ except Exception as e:
     st.error(f"Error procesando datos de OC: {e}")
     st.stop()
 
-# Convertimos la OC a string para permitir la búsqueda parcial
+# (MODIFICADO) Validamos y convertimos a string las columnas de filtro ANTES de filtrar
+if 'Comentarios' not in df_oc_clean.columns:
+    df_oc_clean['Comentarios'] = 'N/A'
+
 df_oc_clean['Número de documento'] = df_oc_clean['Número de documento'].astype(str)
+df_oc_clean['Comentarios'] = df_oc_clean['Comentarios'].astype(str)
+
 
 # Empezamos con el filtro base (futuras y con cantidad)
 df_llegadas_detalle = df_oc_clean[
-    (df_oc_clean['Cantidad'] > 0) & 
-    (df_oc_clean['Fecha de entrega de la línea'] >= today)  
+    (df_oc_clean['Cantidad'] > 0) &
+    (df_oc_clean['Fecha de entrega de la línea'] >= today)
 ].copy() # Hacemos una copia para evitar SettingWithCopyWarning
+
+# (MODIFICADO) Agregamos el nombre del artículo ANTES de filtrar
+df_llegadas_detalle['Nombre Artículo'] = df_llegadas_detalle['Número de artículo'].map(mapa_nombres).fillna('Nombre no encontrado')
+df_llegadas_detalle['Nombre Artículo'] = df_llegadas_detalle['Nombre Artículo'].astype(str)
+
 
 # Aplicamos el filtro de SKU si no es "Todas"
 if sku_seleccionado != "Todas":
@@ -91,9 +114,29 @@ if sku_seleccionado != "Todas":
 if oc_buscada:
     df_llegadas_detalle = df_llegadas_detalle[
         df_llegadas_detalle['Número de documento'].str.contains(
-            oc_buscada, 
+            oc_buscada,
             case=False, # Ignora mayúsculas/minúsculas
-            na=False    # Trata los NaN como si no coincidieran
+            na=False      # Trata los NaN como si no coincidieran
+        )
+    ]
+
+# Aplicamos el filtro de Comentarios si se escribió algo
+if comentarios_buscados:
+    df_llegadas_detalle = df_llegadas_detalle[
+        df_llegadas_detalle['Comentarios'].str.contains(
+            comentarios_buscados,
+            case=False, # Ignora mayúsculas/minúsculas
+            na=False
+        )
+    ]
+
+# (NUEVO) Aplicamos el filtro de Nombre de Producto si se escribió algo
+if nombre_buscado:
+    df_llegadas_detalle = df_llegadas_detalle[
+        df_llegadas_detalle['Nombre Artículo'].str.contains(
+            nombre_buscado,
+            case=False, # Ignora mayúsculas/minúsculas
+            na=False
         )
     ]
 
@@ -101,35 +144,25 @@ if oc_buscada:
 if df_llegadas_detalle.empty:
     st.info("No se encontraron llegadas programadas que coincidan con los filtros.")
 else:
-    # Validamos que las columnas existan
-    if 'Comentarios' not in df_llegadas_detalle.columns:
-            df_llegadas_detalle['Comentarios'] = 'N/A' 
-                
+    # Validamos que las columnas existan (aunque ya lo hicimos arriba, es una doble seguridad)
     if 'Número de documento' not in df_llegadas_detalle.columns:
-            st.error("Columna 'Número de documento' (OC) no encontrada en OPOR.xlsx")
-            st.stop()
+        st.error("Columna 'Número de documento' (OC) no encontrada en OPOR.xlsx")
+        st.stop()
 
-    # Seleccionamos las columnas de interés
+    # (MODIFICADO) Seleccionamos las columnas de interés (Nombre Artículo ya existe)
     df_display = df_llegadas_detalle[[
-        'Número de documento',
-        'Número de artículo',
-        'Fecha de entrega de la línea',
-        'Cantidad',
-        'Comentarios'
-    ]].copy()
-    
-    # Agregamos el nombre del artículo usando el mapa
-    df_display['Nombre Artículo'] = df_display['Número de artículo'].map(mapa_nombres).fillna('Nombre no encontrado')
-    
-    # Reordenamos y Renombramos
-    df_display = df_display[[
         'Número de documento',
         'Número de artículo',
         'Nombre Artículo',
         'Cantidad',
         'Fecha de entrega de la línea',
         'Comentarios'
-    ]]
+    ]].copy()
+
+    # Agregamos el nombre del artículo usando el mapa (YA NO ES NECESARIO, SE HIZO ARRIBA)
+    # df_display['Nombre Artículo'] = df_display['Número de artículo'].map(mapa_nombres).fillna('Nombre no encontrado')
+
+    # Reordenamos y Renombramos (YA ESTÁ ORDENADO)
     
     df_display.rename(columns={
         'Número de documento': 'N° Orden Compra',
@@ -139,7 +172,7 @@ else:
         'Fecha de entrega de la línea': 'Fecha Llegada',
         'Comentarios': 'Comentarios'
     }, inplace=True)
-    
+
     df_display = df_display.sort_values(by='Fecha Llegada')
 
     # Formateamos para mejor lectura

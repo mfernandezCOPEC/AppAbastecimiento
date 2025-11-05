@@ -1,5 +1,5 @@
 # --- ARCHIVO: pages/5_📈_Residencial.py ---
-# (Versión Corregida con lógica de datos separada)
+# (Versión Corregida con lógica de datos separada para Ventas, Inicios y Términos)
 
 import streamlit as st
 import pandas as pd
@@ -32,53 +32,70 @@ try:
     df_residencial = st.session_state.df_residencial.copy()
 
     # --- Limpieza y Transformación de Datos ---
-    # Convertimos las columnas a los tipos correctos (usando los nombres de tu código)
+    # Convertimos las columnas a los tipos correctos
     df_residencial['kWp'] = pd.to_numeric(df_residencial['kWp'], errors='coerce')
     df_residencial['Fecha de ganado'] = pd.to_datetime(df_residencial['Fecha de ganado'], errors='coerce')
     df_residencial['Fecha de inicio de instalación real'] = pd.to_datetime(df_residencial['Fecha de inicio de instalación real'], errors='coerce')
+    df_residencial['Fecha de término de instalación real'] = pd.to_datetime(df_residencial['Fecha de término de instalación real'], errors='coerce')
 
     # --- (CORRECCIÓN IMPORTANTE) ---
-    # CREAMOS DOS DATAFRAMES:
+    # CREAMOS TRES DATAFRAMES SEPARADOS:
     
     # 1. df_ventas: Para KPIs de ventas. Solo requiere datos de venta.
     df_ventas = df_residencial.dropna(subset=['Fecha de ganado', 'kWp', 'CeCo']).copy()
     df_ventas['Mes Fecha de ganado'] = df_ventas['Fecha de ganado'].dt.to_period('M').astype(str)
 
-    # 2. df_instalaciones: Para KPIs de ciclo e instalación. Requiere AMBAS fechas.
-    df_instalaciones = df_residencial.dropna(subset=['Fecha de ganado', 'Fecha de inicio de instalación real', 'kWp', 'CeCo']).copy()
+    # 2. df_iniciados: Para KPIs de ciclo e instalación INICIADA.
+    df_iniciados = df_residencial.dropna(subset=['Fecha de ganado', 'Fecha de inicio de instalación real', 'kWp', 'CeCo']).copy()
     
-    # --- Cálculo de Métricas Clave (Solo en df_instalaciones) ---
-    if not df_instalaciones.empty:
+    # 3. df_terminados: Para KPIs de instalación TERMINADA.
+    df_terminados = df_residencial.dropna(subset=['Fecha de ganado', 'Fecha de inicio de instalación real', 'Fecha de término de instalación real', 'kWp', 'CeCo']).copy()
+    
+    # --- Cálculo de Métricas Clave (en sus DFs correspondientes) ---
+    if not df_iniciados.empty:
         # Días desde la venta hasta el inicio de la instalación
-        df_instalaciones['Dias (Venta a Instalación)'] = (df_instalaciones['Fecha de inicio de instalación real'] - df_instalaciones['Fecha de ganado']).dt.days
-        
-        # Filtramos datos ilógicos (instalaciones antes de ganar)
-        df_instalaciones = df_instalaciones[df_instalaciones['Dias (Venta a Instalación)'] >= 0].copy()
+        df_iniciados['Dias (Venta a Inicio)'] = (df_iniciados['Fecha de inicio de instalación real'] - df_iniciados['Fecha de ganado']).dt.days
+        # Filtramos datos ilógicos
+        df_iniciados = df_iniciados[df_iniciados['Dias (Venta a Inicio)'] >= 0].copy()
+
+    if not df_terminados.empty:
+        # Días de ejecución (inicio a fin)
+        df_terminados['Dias (Ejecución Inicio a Fin)'] = (df_terminados['Fecha de término de instalación real'] - df_terminados['Fecha de inicio de instalación real']).dt.days
+        # Filtramos datos ilógicos
+        df_terminados = df_terminados[df_terminados['Dias (Ejecución Inicio a Fin)'] >= 0].copy()
+
 
 except Exception as e:
     st.error(f"Error al procesar los datos residenciales: {e}")
-    st.info("Asegúrese que las columnas 'CeCo', 'kWp', 'Fecha de ganado', y 'Fecha de inicio de instalación real' existen en 'BD_Master_Residencial.xlsx'.")
+    st.info("Asegúrese que las columnas 'CeCo', 'kWp', 'Fecha de ganado', 'Fecha de inicio de instalación real' y 'Fecha de término de instalación real' existen en 'BD_Master_Residencial.xlsx'.")
     st.stop()
 
 # --- 3. Mostrar KPIs Principales ---
 st.subheader("KPIs Generales")
 
 # El filtro de año se basa en las VENTAS (df_ventas)
+if df_ventas.empty:
+    st.warning("No hay datos de ventas suficientes para mostrar KPIs.")
+    st.stop()
+    
 anos_disponibles = sorted(df_ventas['Fecha de ganado'].dt.year.unique(), reverse=True)
 if not anos_disponibles:
     st.warning("No hay datos suficientes para mostrar KPIs.")
     st.stop()
     
-ano_seleccionado = st.selectbox("Seleccione Año para KPIs:", anos_disponibles)
+ano_seleccionado = st.selectbox("Seleccione Año para KPIs (basado en Fecha de Ganado):", anos_disponibles)
 
-# Filtramos ambos DataFrames
+# Filtramos todos los DataFrames por el año de VENTA
 df_filtrado_ventas = df_ventas[df_ventas['Fecha de ganado'].dt.year == ano_seleccionado]
-df_filtrado_instal = df_instalaciones[df_instalaciones['Fecha de ganado'].dt.year == ano_seleccionado]
+df_filtrado_iniciados = df_iniciados[df_iniciados['Fecha de ganado'].dt.year == ano_seleccionado]
+df_filtrado_terminados = df_terminados[df_terminados['Fecha de ganado'].dt.year == ano_seleccionado]
+
 
 if df_filtrado_ventas.empty:
     st.warning(f"No hay datos para el año {ano_seleccionado}.")
 else:
-    col1, col2, col3 = st.columns(3)
+    # (MODIFICADO) 4 KPIs
+    col1, col2, col3, col4 = st.columns(4)
     # KPI de Ventas (usa df_filtrado_ventas)
     col1.metric(
         label=f"Proyectos Ganados ({ano_seleccionado})",
@@ -89,15 +106,27 @@ else:
         label=f"Total kWp Ganados ({ano_seleccionado})",
         value=f"{df_filtrado_ventas['kWp'].sum():,.1f} kWp"
     )
-    # KPI de Ciclo (usa df_filtrado_instal)
-    if not df_filtrado_instal.empty:
+    # KPI de Ciclo (usa df_filtrado_iniciados)
+    if not df_filtrado_iniciados.empty:
         col3.metric(
-            label=f"Tiempo Prom. (Venta a Instalación) ({ano_seleccionado})",
-            value=f"{df_filtrado_instal['Dias (Venta a Instalación)'].mean():.1f} días"
+            label=f"Tiempo Prom. (Venta a Inicio) ({ano_seleccionado})",
+            value=f"{df_filtrado_iniciados['Dias (Venta a Inicio)'].mean():.1f} días"
         )
     else:
         col3.metric(
-            label=f"Tiempo Prom. (Venta a Instalación) ({ano_seleccionado})",
+            label=f"Tiempo Prom. (Venta a Inicio) ({ano_seleccionado})",
+            value="N/A"
+        )
+    
+    # (NUEVO) KPI de Ejecución (usa df_filtrado_terminados)
+    if not df_filtrado_terminados.empty:
+        col4.metric(
+            label=f"Tiempo Prom. Ejecución (Inicio a Fin) ({ano_seleccionado})",
+            value=f"{df_filtrado_terminados['Dias (Ejecución Inicio a Fin)'].mean():.1f} días"
+        )
+    else:
+        col4.metric(
+            label=f"Tiempo Prom. Ejecución (Inicio a Fin) ({ano_seleccionado})",
             value="N/A"
         )
 
@@ -108,7 +137,7 @@ st.subheader("Visualizaciones")
 
 # --- Gráfico 1: kWp Ganados por Mes ---
 st.markdown("#### kWp Ganados por Mes")
-chart_kWp_mes = alt.Chart(df_ventas).mark_bar().encode( # Usa df_ventas
+chart_kWp_mes = alt.Chart(df_ventas).mark_bar(color="#004a99").encode( # Usa df_ventas
     x=alt.X('yearmonth(Fecha de ganado):T', title='Mes (Proyecto Ganado)'),
     y=alt.Y('kWp:Q', aggregate='sum', title='Suma de kWp'),
     tooltip=[
@@ -121,7 +150,7 @@ st.altair_chart(chart_kWp_mes, use_container_width=True)
 
 # --- Gráfico 2: N° de Proyectos Ganados por Mes ---
 st.markdown("#### N° de Proyectos Ganados por Mes")
-chart_proyectos_mes = alt.Chart(df_ventas).mark_line(point=True).encode( # Usa df_ventas
+chart_proyectos_mes = alt.Chart(df_ventas).mark_line(point=True, color="#004a99").encode( # Usa df_ventas
     x=alt.X('yearmonth(Fecha de ganado):T', title='Mes (Proyecto Ganado)'),
     y=alt.Y('count()', title='Número de Proyectos'),
     tooltip=[
@@ -134,7 +163,7 @@ st.altair_chart(chart_proyectos_mes, use_container_width=True)
 
 # --- Gráfico 3: N° de Proyectos Iniciados (Instalación) por Mes ---
 st.markdown("#### N° de Proyectos Iniciados (Instalación) por Mes")
-chart_proyectos_instalados_mes = alt.Chart(df_instalaciones).mark_bar(color='#2ca02c', opacity=0.8).encode( # Usa df_instalaciones
+chart_proyectos_instalados_mes = alt.Chart(df_iniciados).mark_bar(color='#2ca02c', opacity=0.8).encode( # Usa df_iniciados
     x=alt.X('yearmonth(Fecha de inicio de instalación real):T', title='Mes (Inicio Instalación)'),
     y=alt.Y('count()', title='Número de Proyectos Iniciados'),
     tooltip=[
@@ -144,45 +173,57 @@ chart_proyectos_instalados_mes = alt.Chart(df_instalaciones).mark_bar(color='#2c
 ).interactive()
 st.altair_chart(chart_proyectos_instalados_mes, use_container_width=True)
 
-# --- (NUEVO) GRÁFICO 4: kWp Instalados por Mes ---
-st.markdown("#### kWp Instalados por Mes")
-chart_kWp_instalados_mes = alt.Chart(df_instalaciones).mark_bar(color='#1f77b4', opacity=0.8).encode( # Usa df_instalaciones
-    # Usamos la columna 'Fecha de inicio de instalación real'
+# --- Gráfico 4: kWp Instalados (Iniciados) por Mes ---
+st.markdown("#### kWp Instalados (Proyectos Iniciados) por Mes")
+chart_kWp_instalados_mes = alt.Chart(df_iniciados).mark_bar(color='#1f77b4', opacity=0.8).encode( # Usa df_iniciados
     x=alt.X('yearmonth(Fecha de inicio de instalación real):T', title='Mes (Inicio Instalación)'),
-    
-    # Sumamos los 'kWp'
-    y=alt.Y('kWp:Q', aggregate='sum', title='Suma de kWp Instalados'),
-    
+    y=alt.Y('kWp:Q', aggregate='sum', title='Suma de kWp (Iniciados)'),
     tooltip=[
         alt.Tooltip('yearmonth(Fecha de inicio de instalación real):T', title='Mes Inicio'),
-        alt.Tooltip('kWp:Q', aggregate='sum', title='Total kWp Instalados'),
+        alt.Tooltip('kWp:Q', aggregate='sum', title='Total kWp (Iniciados)'),
         alt.Tooltip('count()', title='N° Proyectos Iniciados')
     ]
 ).interactive()
 st.altair_chart(chart_kWp_instalados_mes, use_container_width=True)
 
+# --- (NUEVO) GRÁFICO 5: N° de Proyectos Terminados por Mes ---
+st.markdown("#### N° de Proyectos Terminados por Mes")
+chart_proyectos_terminados_mes = alt.Chart(df_terminados).mark_bar(color='#ff7f0e', opacity=0.8).encode( # Usa df_terminados
+    # Usamos la columna 'Fecha de término de instalación real'
+    x=alt.X('yearmonth(Fecha de término de instalación real):T', title='Mes (Término Instalación)'),
+    
+    # Contamos los proyectos
+    y=alt.Y('count()', title='Número de Proyectos Terminados'),
+    
+    tooltip=[
+        alt.Tooltip('yearmonth(Fecha de término de instalación real):T', title='Mes Término'),
+        alt.Tooltip('count()', title='N° Proyectos Terminados')
+    ]
+).interactive()
+st.altair_chart(chart_proyectos_terminados_mes, use_container_width=True)
 
-# --- Gráfico 5: Histograma de Tiempos de Ciclo ---
-st.markdown("#### Distribución: Días de Venta a Instalación")
+
+# --- Gráfico 6: Histograma de Tiempos de Ciclo (Venta a Inicio) ---
+st.markdown("#### Distribución: Días de Venta a Inicio de Instalación")
 st.markdown("Muestra cuántos proyectos tardan 'X' días en comenzar a instalarse después de la venta.")
-chart_histogram_lag = alt.Chart(df_instalaciones).mark_bar().encode( # Usa df_instalaciones
-    x=alt.X('Dias (Venta a Instalación):Q', bin=alt.Bin(maxbins=30), title='Días (Venta a Instalación)'),
+chart_histogram_lag = alt.Chart(df_iniciados).mark_bar().encode( # Usa df_iniciados
+    x=alt.X('Dias (Venta a Inicio):Q', bin=alt.Bin(maxbins=30), title='Días (Venta a Inicio)'),
     y=alt.Y('count()', title='Cantidad de Proyectos'),
     tooltip=[
-        alt.Tooltip('Dias (Venta a Instalación):Q', bin=alt.Bin(maxbins=30), title='Rango (Días)'),
+        alt.Tooltip('Dias (Venta a Inicio):Q', bin=alt.Bin(maxbins=30), title='Rango (Días)'),
         alt.Tooltip('count()', title='Cantidad de Proyectos')
     ]
 ).interactive()
 st.altair_chart(chart_histogram_lag, use_container_width=True)
 
 
-# --- Gráfico 6: Relación entre Tamaño de Proyecto (kWp) y Tiempo ---
-st.markdown("#### Relación: kWp vs. Días de Venta a Instalación")
+# --- Gráfico 7: Relación entre Tamaño de Proyecto (kWp) y Tiempo (Venta a Inicio) ---
+st.markdown("#### Relación: kWp vs. Días de Venta a Inicio")
 st.markdown("Ayuda a ver si los proyectos más grandes (más kWp) tardan más en instalarse.")
-chart_scatter_lag_kWp = alt.Chart(df_instalaciones).mark_circle(opacity=0.6).encode( # Usa df_instalaciones
+chart_scatter_lag_kWp = alt.Chart(df_iniciados).mark_circle(opacity=0.6).encode( # Usa df_iniciados
     x=alt.X('kWp:Q', title='kWp del Proyecto', scale=alt.Scale(zero=False)),
-    y=alt.Y('Dias (Venta a Instalación):Q', title='Días (Venta a Instalación)', scale=alt.Scale(zero=False)),
-    tooltip=['CeCo:N', 'kWp:Q', 'Dias (Venta a Instalación):Q']
+    y=alt.Y('Dias (Venta a Inicio):Q', title='Días (Venta a Inicio)', scale=alt.Scale(zero=False)),
+    tooltip=['CeCo:N', 'kWp:Q', 'Dias (Venta a Inicio):Q']
 ).interactive()
 st.altair_chart(chart_scatter_lag_kWp, use_container_width=True)
 
@@ -190,5 +231,8 @@ st.altair_chart(chart_scatter_lag_kWp, use_container_width=True)
 with st.expander("Ver tabla de datos de Ventas (Todos los ganados)"):
     st.dataframe(df_ventas, use_container_width=True)
 
-with st.expander("Ver tabla de datos de Instalaciones (Solo con fecha de inicio)"):
-    st.dataframe(df_instalaciones, use_container_width=True)
+with st.expander("Ver tabla de datos de Proyectos Iniciados"):
+    st.dataframe(df_iniciados, use_container_width=True)
+    
+with st.expander("Ver tabla de datos de Proyectos Terminados"):
+    st.dataframe(df_terminados, use_container_width=True)

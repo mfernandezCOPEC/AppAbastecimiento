@@ -51,4 +51,8 @@ MAPEO_SKUS = {
     # Baterias 
     # 5wkp 006594
     'EXI-009496': 'EXI-006594', # huawei anterior 5Kw
+
+
+    # Estructuras techo
+
 }
