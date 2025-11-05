@@ -47,7 +47,11 @@ MAPEO_SKUS = {
     #Inversores 25KTL HUAWEI C&I
     'EXI-006082': 'EXI-009219', # huawei anterior 25Kw
     # Inversores 8k 
-    
+
+    #Inversores 6k 008525
+    'EXI-008655': 'EXI-009233', # solis 6k
+    'EXI-006043': 'EXI-009233', # solis 6k
+
     # Baterias 
     # 5wkp 006594
     'EXI-009496': 'EXI-006594', # huawei anterior 5Kw

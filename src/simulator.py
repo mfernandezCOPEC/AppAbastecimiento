@@ -1,5 +1,5 @@
 # --- ARCHIVO: src/simulator.py ---
-# (Modificado para importar 'config' desde 'src')
+# (Modificado para importar 'config' desde 'src' y aceptar listas de bodegas)
 
 import pandas as pd
 import numpy as np
@@ -7,8 +7,8 @@ import config # Importa config.py desde la misma carpeta 'src'
 
 def run_inventory_simulation(
     sku_to_simulate: str,
-    warehouse_code: str,
-    consumption_warehouse: str,
+    warehouse_code: list[str], # <-- (MODIFICADO) Acepta una lista
+    consumption_warehouse: list[str], # <-- (MODIFICADO) Acepta una lista
     df_stock_raw: pd.DataFrame,
     df_consumo_raw: pd.DataFrame,
     df_oc_raw: pd.DataFrame,
@@ -26,10 +26,10 @@ def run_inventory_simulation(
     
     # --- B. CÁLCULO DE STOCK INICIAL (I_0) ---
     
-    # Filtra el DataFrame de stock para el SKU y bodega específicos
+    # (MODIFICADO) Filtra el DataFrame de stock para el SKU y MÚLTIPLES bodegas
     df_stock_filtered = df_stock_raw[
         (df_stock_raw['CodigoArticulo'] == sku_to_simulate) &
-        (df_stock_raw['CodigoBodega'] == warehouse_code)
+        (df_stock_raw['CodigoBodega'].isin(warehouse_code)) # <-- (MODIFICADO) Usa .isin()
     ].copy()
     
     # Asegura que el stock sea numérico y calcula el total
@@ -38,10 +38,10 @@ def run_inventory_simulation(
 
     # --- C. CÁLCULO DE CONSUMO ---
     
-    # Filtra el DataFrame de consumo para el SKU y bodega de consumo específicos
+    # (MODIFICADO) Filtra el DataFrame de consumo para el SKU y MÚLTIPLES bodegas
     df_consumo_filtered = df_consumo_raw[
         (df_consumo_raw['CodigoArticulo'] == sku_to_simulate) &
-        (df_consumo_raw['BodegaDestino_Requerida'] == consumption_warehouse)
+        (df_consumo_raw['BodegaDestino_Requerida'].isin(consumption_warehouse)) # <-- (MODIFICADO) Usa .isin()
     ].copy()
     
     # Inicializa métricas de demanda (buena práctica para asegurar que existan)
