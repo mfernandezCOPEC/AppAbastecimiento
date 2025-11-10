@@ -45,15 +45,15 @@ def _load_all_data():
     # --- Filtro Global de 4 Meses ---
     hoy = pd.Timestamp.now()
     hace_4_meses = (hoy - pd.DateOffset(months=4)).replace(day=1) # hace 6 meses puse ahora
-    hace_6_meses = (hoy - pd.DateOffset(months=6)).replace(day=1) # hace 6 meses puse ahora
+    hace_3_meses = (hoy - pd.DateOffset(months=3)).replace(day=1) # hace 6 meses puse ahora
 
-    df_oc = df_oc[df_oc['Fecha de contabilización'] >= hace_6_meses].copy()
+    df_oc = df_oc[df_oc['Fecha de contabilización'] >= hace_4_meses].copy()
     df_oc = df_oc[~df_oc['Comentarios'].str.contains('PROA', na=False)].copy()    
-    df_consumo = df_consumo[df_consumo['FechaSolicitud'] >= hace_4_meses].copy()
+    df_consumo = df_consumo[df_consumo['FechaSolicitud'] >= hace_3_meses].copy()
 
     # --- Limpieza Global de SKUs (Usando config) ---
     df_consumo['CodigoArticulo'] = df_consumo['CodigoArticulo'].replace(config.MAPEO_SKUS)
-    # df_oc['Número de artículo'] = df_oc['Número de artículo'].replace(config.MAPEO_SKUS)
+    df_oc['Número de artículo'] = df_oc['Número de artículo'].replace(config.MAPEO_SKUS)
     df_stock['CodigoArticulo'] = df_stock['CodigoArticulo'].replace(config.MAPEO_SKUS)
     
     print("Datos globales cargados y limpiados.")

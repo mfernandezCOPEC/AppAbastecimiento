@@ -46,8 +46,9 @@ MAPEO_SKUS = {
     'EXI-007037': 'EXI-008660', # huawei anterior 5Kw
     #Inversores 25KTL HUAWEI C&I
     'EXI-006082': 'EXI-009219', # huawei anterior 25Kw
-    # Inversores 8k 
-
+    # Inversores 8k hibridos monofasicos
+    'EXI-008657': 'EXI-009234', # sku anterior
+    'EXI-008381': 'EXI-009234', # sku anterior
     #Inversores 6k 008525
     'EXI-008655': 'EXI-009233', # solis 6k
     'EXI-006043': 'EXI-009233', # solis 6k
@@ -58,5 +59,7 @@ MAPEO_SKUS = {
 
 
     # Estructuras techo
+
+
 
 }

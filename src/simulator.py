@@ -1,5 +1,6 @@
 # --- ARCHIVO: src/simulator.py ---
 # (Modificado para importar 'config' desde 'src' y aceptar listas de bodegas)
+# (v2 - Corregido el cálculo del promedio mensual para incluir meses con consumo 0)
 
 import pandas as pd
 import numpy as np
@@ -68,17 +69,29 @@ def run_inventory_simulation(
         df_consumo_indexed = df_consumo_filtered.set_index('FechaSolicitud')
         
         # Agrupa el consumo por mes ('MS' = Month Start) y suma las cantidades
+        # NOTA: Esto crea una serie 'sparse' (solo con meses que tuvieron consumo)
         consumo_mensual = df_consumo_indexed.resample('MS')['CantidadSolicitada'].sum()
         
         # 2. Cálculo para SS y ROP (promedios históricos)
         
-        # --- MODIFICACIÓN CLAVE ---
-        # Excluimos el mes actual de los cálculos estadísticos (media, std)
-        consumo_historico_completo = consumo_mensual[consumo_mensual.index < start_of_current_month]
+        # --- INICIO DE LA MODIFICACIÓN (Arreglo del Promedio) ---
+        # Creamos un rango de fechas completo para los 4 meses históricos 
+        # (El período de datos que se carga en data_loader.py es de 4 meses)
+        # (Ej: Si hoy es Nov, el rango es Jul-01, Ago-01, Sep-01, Oct-01)
+        full_historical_range = pd.date_range(
+            start=(today - pd.DateOffset(months=4)).replace(day=1), 
+            end=start_of_current_month, 
+            freq='MS',
+            inclusive='left' # 'left' excluye la fecha 'end' (Nov-01)
+        )
+        
+        # Re-indexamos 'consumo_mensual' (que era 'sparse') a este rango completo.
+        # Los meses que no estaban en 'consumo_mensual' (consumo 0) se crearán con 'fill_value=0'.
+        consumo_historico_completo = consumo_mensual.reindex(full_historical_range, fill_value=0)
         # --- FIN DE LA MODIFICACIÓN ---
 
         if len(consumo_historico_completo) > 1:
-            # Calcula la media y std usando SOLO los meses históricos completos
+            # Calcula la media y std usando TODOS los meses históricos completos (incluyendo los 0)
             monthly_demand_mean = consumo_historico_completo.mean()
             monthly_demand_std = consumo_historico_completo.std()
             
@@ -93,7 +106,8 @@ def run_inventory_simulation(
 
         # 3. Cálculo para Req. 1 (meses individuales)
         
-        # Aquí SÍ usamos 'consumo_mensual' (el original)
+        # Aquí SÍ usamos 'consumo_mensual' (el original 'sparse')
+        # .get() busca la fecha; si no la encuentra, devuelve 0 (comportamiento correcto)
         demand_M_0 = consumo_mensual.get(start_of_current_month, 0)
         demand_M_1 = consumo_mensual.get(start_of_M_minus_1, 0)
         demand_M_2 = consumo_mensual.get(start_of_M_minus_2, 0)
