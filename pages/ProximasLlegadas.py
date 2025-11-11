@@ -75,6 +75,7 @@ st.markdown("---")
 
 # --- 4. Filtrar y Mostrar OCs ---
 today = pd.Timestamp.now().floor('D')
+start_date = today - pd.Timedelta(days=10)
 
 # Limpiamos las fechas y cantidades de OC
 df_oc_clean = df_oc.copy()
@@ -96,7 +97,7 @@ df_oc_clean['Comentarios'] = df_oc_clean['Comentarios'].astype(str)
 # Empezamos con el filtro base (futuras y con cantidad)
 df_llegadas_detalle = df_oc_clean[
     (df_oc_clean['Cantidad'] > 0) &
-    (df_oc_clean['Fecha de entrega de la línea'] >= today)
+    (df_oc_clean['Fecha de entrega de la línea'] >= start_date)
 ].copy() # Hacemos una copia para evitar SettingWithCopyWarning
 
 # (MODIFICADO) Agregamos el nombre del artículo ANTES de filtrar
