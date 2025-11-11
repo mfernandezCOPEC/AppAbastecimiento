@@ -48,7 +48,7 @@ def _load_all_data():
     hace_3_meses = (hoy - pd.DateOffset(months=3)).replace(day=1) # hace 6 meses puse ahora
 
     df_oc = df_oc[df_oc['Fecha de contabilización'] >= hace_5_meses].copy()
-    df_oc = df_oc[~df_oc['Comentarios'].str.contains('PROA', na=False)].copy()    
+    #df_oc = df_oc[~df_oc['Comentarios'].str.contains('PROA', na=False)].copy()    
     df_consumo = df_consumo[df_consumo['FechaSolicitud'] >= hace_3_meses].copy()
 
     # --- Limpieza Global de SKUs (Usando config) ---
