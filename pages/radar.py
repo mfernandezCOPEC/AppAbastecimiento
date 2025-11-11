@@ -92,39 +92,17 @@ if familia_sel != "(Seleccione una Familia)":
     df_consumo_radar = df_consumo
     df_oc_radar = df_oc
 
-    if familia_sel != "Todas":
-        try:
-            # 1. Filtra el DataFrame de stock
-            df_stock_radar = df_stock[df_stock['Familia'] == familia_sel]
-            
-            if df_stock_radar.empty:
-                st.warning(f"No se encontraron SKUs de stock para la familia '{familia_sel}'.")
-                st.stop()
-
-            # 2. Obtiene la lista de SKUs únicos que pertenecen a esa familia
-            skus_de_familia = df_stock_radar['CodigoArticulo'].unique() 
-            
-            # 3. Filtra Consumo y OC para que solo incluyan esos SKUs
-            df_consumo_radar = df_consumo[df_consumo['CodigoArticulo'].isin(skus_de_familia)]
-            df_oc_radar = df_oc[df_oc['Número de artículo'].isin(skus_de_familia)]
-            
-            st.info(f"Filtrando por {len(skus_de_familia)} SKUs de la familia '{familia_sel}'.")
-
-        except KeyError as e:
-            st.error(f"Error: No se encontró la columna 'Familia' o 'SKU' en los DataFrames. Detalle: {e}")
-            st.stop()
-    # --- Fin Pre-filtrado ---
-
-    with st.spinner("Calculando KPIs para todos los SKUs... Esto puede tardar un momento."):
+    with st.spinner("Calculando KPIs para todos los SKUs..."):
         df_radar = radar_engine.run_full_radar_analysis(
-            df_stock_radar,
-            df_consumo_radar,
-            df_oc_radar,
-            bodega_stock_sel,
-            bodega_consumo_sel,
-            lead_time_days,
-            service_level_z
-        )
+        df_stock,          # <-- Pasa el DF completo desde session_state
+        df_consumo,        # <-- Pasa el DF completo desde session_state
+        df_oc,             # <-- Pasa el DF completo desde session_state
+        familia_sel,       # <-- Pasa el string del filtro
+        bodega_stock_sel,
+        bodega_consumo_sel,
+        lead_time_days,
+        service_level_z
+    )
 
     # --- Mensajes de resultado ---
     if df_radar.empty:
