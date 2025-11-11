@@ -1,5 +1,5 @@
-# --- ARCHIVO: pages/6_📦_Consulta_Stock.py ---
-# (Modificado para incluir soporte de Expresiones Regulares - Regex)
+# --- ARCHIVO: pages/3_📡_Radar.py ---
+# (PÁGINA MODIFICADA CON FILTRO DE FAMILIA)
 
 import streamlit as st
 import pandas as pd
@@ -7,173 +7,187 @@ import sys
 from pathlib import Path
 
 # --- Configuración del Path ---
-# (Necesario en CADA archivo de 'pages' para encontrar 'src')
+# Asegura que la app pueda encontrar los módulos en la carpeta 'src'
 src_path = str(Path(__file__).resolve().parent.parent / "src")
 if src_path not in sys.path:
     sys.path.append(src_path)
 
-try:
-    import ui_helpers # Para la localización
-except ImportError:
-    st.warning("No se pudo importar 'ui_helpers.py'. Se usarán configuraciones por defecto.")
-    # Definir una función ficticia si no existe
-    class DummyUIHelpers:
-        def setup_locale(self):
-            pass
-    ui_helpers = DummyUIHelpers()
+import config
+import radar_engine # <-- Importamos nuestro motor de radar
+import ui_helpers # Para la barra lateral (si la tienes personalizada)
 
+# --- 1. Configuración de Página ---
+st.set_page_config(layout="wide", page_title="Radar de Inventario")
+st.title("Radar de Inventario 📡")
+st.markdown("Visión general del estado del inventario para priorizar acciones.")
 
-# --- 1. Configuración de Página y Verificación de Datos ---
-st.set_page_config(layout="wide", page_title="Consulta de Stock")
-ui_helpers.setup_locale() # Configura meses en español
+# (Opcional: si tienes la barra lateral personalizada, descomenta la línea de abajo)
+# ui_helpers.add_sidebar_navigation() 
 
-st.title("Consulta de Inventario en Bodega 📦")
-st.markdown("Busque y filtre el stock disponible por SKU, nombre o bodega.")
-
+# --- 2. Verificar Carga de Datos ---
+# Comprueba si los datos fueron cargados en la página principal (Menu.py)
 if 'data_loaded' not in st.session_state or not st.session_state.data_loaded:
-    st.error("Los datos no se han cargado. Por favor, vuelva al Menú Principal.")
-    st.stop()
+    st.error("Los datos no se han cargado. Por favor, vuelva al Menú Principal e inténtelo de nuevo.")
+    st.stop() # Detiene la ejecución de la página si no hay datos
 
-# --- 2. Acceder y Preparar los Datos ---
-# Columnas que esperamos encontrar. AJUSTA ESTOS NOMBRES SI SON DIFERENTES.
-COL_SKU = 'CodigoArticulo'
-COL_NOMBRE = 'NombreArticulo' # Esta es una suposición, ajústala si es necesario.
-COL_BODEGA = 'CodigoBodega'
-COL_STOCK = 'DisponibleParaPrometer'
+# --- 3. Acceder a los Datos desde st.session_state ---
+# Trae los DataFrames cargados desde la memoria de la sesión
+df_stock = st.session_state.df_stock
+df_oc = st.session_state.df_oc
+df_consumo = st.session_state.df_consumo
 
+# --- 4. Controles de Simulación (en la página principal) ---
+st.subheader("Parámetros del Reporte")
+
+# --- NUEVO: Obtener lista de Familias ---
 try:
-    df_stock_raw = st.session_state.df_stock.copy()
+    # Obtiene valores únicos de la col 'Familia', elimina nulos (NaN), ordena alfabéticamente
+    familias_list = sorted(df_stock['Familia'].dropna().unique())
+    # Inserta "Todas" al principio de la lista como opción por defecto
+    familias_list.insert(0, "Todas")
+except KeyError:
+    # Maneja el error si la columna 'Familia' no existe en Stock.xlsx
+    st.error("Error: La columna 'Familia' no se encontró en 'Stock.xlsx'. No se puede filtrar.")
+    familias_list = ["Todas"] # Permite que la app continúe
+# --- FIN NUEVO ---
+
+# Obtiene listas únicas para los filtros de bodega
+lista_bodegas_stock = sorted(df_stock['CodigoBodega'].dropna().unique())
+lista_bodegas_consumo = sorted(df_consumo['BodegaDestino_Requerida'].dropna().unique())
+
+# --- MODIFICADO: 5 columnas para incluir el nuevo filtro de Familia ---
+col1, col2, col3, col4, col5 = st.columns(5)
+
+with col1:
+    # --- NUEVO: Widget de filtro por Familia ---
+    familia_sel = st.selectbox(
+        "Familia (Categoría):",
+        familias_list,
+        index=0  # Por defecto selecciona "Todas"
+    )
+    # --- FIN NUEVO ---
+with col2:
+    bodega_stock_sel = st.selectbox(
+        "Bodega de Stock:",
+        lista_bodegas_stock,
+        index=lista_bodegas_stock.index('BF0001') if 'BF0001' in lista_bodegas_stock else 0
+    )
+with col3:
+    bodega_consumo_sel = st.selectbox(
+        "Bodega de Consumo:",
+        lista_bodegas_consumo,
+        index=lista_bodegas_consumo.index('Bodega de Proyectos RE') if 'Bodega de Proyectos RE' in lista_bodegas_consumo else 0
+    )
+with col4:
+    service_level_str = st.select_slider(
+        "Nivel de Servicio (para SS):",
+        options=list(config.Z_SCORE_MAP.keys()),
+        value="99%"
+    )
+    service_level_z = config.Z_SCORE_MAP[service_level_str]
+with col5: # Movido a col5
+    lead_time_days = st.number_input("Lead Time (Días) (para ROP):", min_value=1, max_value=120, value=90)
+
+# --- 5. Botón de Ejecución ---
+if st.button("🚀 Generar Reporte de Radar", type="primary", width='stretch'):
     
-    # Limpieza de datos
-    df_stock_raw[COL_STOCK] = pd.to_numeric(df_stock_raw[COL_STOCK], errors='coerce').fillna(0)
-    df_stock_raw[COL_NOMBRE] = df_stock_raw[COL_NOMBRE].astype(str).fillna("N/A")
+    # --- NUEVO: Pre-filtrado de DataFrames por Familia ---
+    # Por defecto, usamos los DataFrames completos cargados en sesión
+    df_stock_radar = df_stock
+    df_consumo_radar = df_consumo
+    df_oc_radar = df_oc
+
+    # Si el usuario selecciona una familia específica (diferente a "Todas")
+    if familia_sel != "Todas":
+        try:
+            # 1. Filtra el DataFrame de stock
+            df_stock_radar = df_stock[df_stock['Familia'] == familia_sel]
+            
+            if df_stock_radar.empty:
+                st.warning(f"No se encontraron SKUs de stock para la familia '{familia_sel}'.")
+                st.stop() # Detiene la ejecución si no hay nada que procesar
+
+            # 2. Obtiene la lista de SKUs únicos que pertenecen a esa familia
+            #    (Asegúrate que la columna de SKU se llame 'SKU' en tus 3 archivos)
+            skus_de_familia = df_stock_radar['SKU'].unique() 
+            
+            # 3. Filtra Consumo y OC para que solo incluyan esos SKUs
+            df_consumo_radar = df_consumo[df_consumo['SKU'].isin(skus_de_familia)]
+            df_oc_radar = df_oc[df_oc['SKU'].isin(skus_de_familia)]
+            
+            st.info(f"Filtrando por {len(skus_de_familia)} SKUs de la familia '{familia_sel}'.")
+
+        except KeyError as e:
+            # Captura error si 'Familia' o 'SKU' no existen
+            st.error(f"Error: No se encontró la columna 'Familia' o 'SKU' en los DataFrames. Detalle: {e}")
+            st.stop()
+    # --- FIN NUEVO ---
     
-    # Listas para los filtros
-    all_skus = sorted(df_stock_raw[COL_SKU].dropna().unique())
-    all_bodegas = sorted(df_stock_raw[COL_BODEGA].dropna().unique())
+    with st.spinner("Calculando KPIs para todos los SKUs... Esto puede tardar un momento."):
+        df_radar = radar_engine.run_full_radar_analysis(
+            # --- MODIFICADO: Usar DFs filtrados ---
+            df_stock_radar,
+            df_consumo_radar,
+            df_oc_radar,
+            # --- FIN MODIFICADO ---
+            bodega_stock_sel,
+            bodega_consumo_sel,
+            lead_time_days,
+            service_level_z
+        )
 
-except KeyError as e:
-    st.error(f"Error de Configuración: No se pudo encontrar la columna {e}.")
-    st.info(f"""
-    Asegúrese de que su archivo 'Stock.xlsx' contenga las columnas esperadas.
-    - Columna de SKU: Se esperaba '{COL_SKU}'
-    - Columna de Nombre: Se esperaba '{COL_NOMBRE}' (Esta es una suposición)
-    - Columna de Bodega: Se esperaba '{COL_BODEGA}'
-    - Columna de Stock: Se esperaba '{COL_STOCK}'
-    
-    Si los nombres son diferentes, por favor ajuste las variables (COL_SKU, COL_NOMBRE, etc.)
-    al inicio del archivo `6_📦_Consulta_Stock.py`.
-    """)
-    st.stop()
-except Exception as e:
-    st.error(f"Error inesperado al cargar datos: {e}")
-    st.stop()
+    # --- MODIFICADO: Mensajes de resultado con filtro ---
+    if df_radar.empty:
+        st.warning(f"No se encontraron datos para los parámetros seleccionados (Familia: {familia_sel}).")
+    else:
+        st.success(f"Reporte generado. Se analizaron {len(df_radar)} SKUs para la familia '{familia_sel}'.")
+    # --- FIN MODIFICADO ---
+        
+        # --- 6. Mostrar Resultados ---
+        st.subheader("Resultados del Radar")
+        
+        # Opciones de visualización
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            filtro_alerta = st.selectbox(
+                "Filtrar por Alerta:",
+                ["Todas", "Solo Alertas de Stock 🔴", "Solo Alertas Proyectadas 🔴"]
+            )
+        
+        df_display = df_radar.copy()
+        
+        # Aplicar filtros de visualización
+        if filtro_alerta == "Solo Alertas de Stock 🔴":
+            df_display = df_display[df_display["Alerta Stock (vs SS)"] == "🔴"]
+        elif filtro_alerta == "Solo Alertas Proyectadas 🔴":
+            df_display = df_display[df_display["Alerta Proy. (vs ROP)"] == "🔴"]
 
-# --- 3. Filtros en la Barra Lateral ---
-st.sidebar.header("Filtros de Búsqueda")
+        # Formatear el DataFrame para visualización
+        st.dataframe(
+            df_display.sort_values(by="DOS (Días)"), # Ordenar por el más crítico
+            width='stretch',
+            hide_index=True,
+            column_config={
+                "Stock Actual": st.column_config.NumberColumn(format="%.0f"),
+                "DOS (Días)": st.column_config.NumberColumn(format="%.1f"),
+                "Stock Proy. (en LT)": st.column_config.NumberColumn(format="%.0f"),
+                "ROP": st.column_config.NumberColumn(format="%.0f"),
+                "Pedido Sugerido": st.column_config.NumberColumn(format="%.0f"),
+                "Demanda Prom. Diaria": st.column_config.NumberColumn(format="%.2f"),
+            }
+        )
+        
+        # Guardar en sesión para descargar
+        st.session_state.df_radar_results = df_display.to_csv(index=False).encode('utf-8')
 
-# Filtro 1: Búsqueda por Nombre (Texto)
-nombre_search = st.sidebar.text_input(
-    "1. Buscar por Nombre de Artículo:",
-    help="Buscará cualquier coincidencia parcial. Escriba 'panel' para encontrar 'Panel Solar 550W'."
-)
-
-# --- (NUEVO) Checkbox para activar Regex ---
-use_regex = st.sidebar.checkbox(
-    "Usar expresiones regulares (avanzado)", 
-    value=False, 
-    help="Permite búsquedas complejas. Ej: '^(Panel|Inversor)' para buscar texto que comience con 'Panel' o 'Inversor'."
-)
-
-# Filtro 2: Selección de SKU (Multiselect)
-sku_selected = st.sidebar.multiselect(
-    "2. Filtrar por SKU:",
-    options=all_skus
-)
-
-# Filtro 3: Selección de Bodega (Multiselect)
-bodega_selected = st.sidebar.multiselect(
-    "3. Filtrar por Bodega:",
-    options=all_bodegas
-)
-
-# Filtro 4: Ocultar sin stock
-hide_zero_stock = st.sidebar.checkbox("Ocultar artículos sin stock", value=True)
-
-# --- 4. Lógica de Filtrado ---
-
-# Empezamos con el dataframe completo
-df_filtered = df_stock_raw
-
-# Aplicar filtro de nombre (case-insensitive)
-if nombre_search:
-    try:
-        # --- (MODIFICADO) ---
-        # Ahora usamos el parámetro 'regex=use_regex'
-        df_filtered = df_filtered[df_filtered[COL_NOMBRE].str.contains(
-            nombre_search, 
-            case=False, 
-            na=False, 
-            regex=use_regex 
-        )]
-    except pd.errors.FilterError as e:
-        # Captura errores si la expresión regular es inválida
-        st.sidebar.error(f"Expresión regular inválida. Intente desactivar la casilla o corrija la expresión.")
-        df_filtered = df_stock_raw.iloc[0:0] # Devuelve un DF vacío
-    except Exception as e:
-        st.sidebar.error(f"Error en el filtro de nombre: {e}")
-        df_filtered = df_stock_raw.iloc[0:0]
-
-# Aplicar filtro de SKU
-if sku_selected: # if list is not empty
-    df_filtered = df_filtered[df_filtered[COL_SKU].isin(sku_selected)]
-
-# Aplicar filtro de Bodega
-if bodega_selected: # if list is not empty
-    df_filtered = df_filtered[df_filtered[COL_BODEGA].isin(bodega_selected)]
-    
-# Aplicar filtro de stock
-if hide_zero_stock:
-    df_filtered = df_filtered[df_filtered[COL_STOCK] > 0]
-
-# --- 5. Mostrar Resultados ---
-
-total_items = len(df_filtered)
-total_stock = df_filtered[COL_STOCK].sum()
-
-st.subheader(f"Resultados de la Búsqueda ({total_items} líneas encontradas)")
-
-# Métricas
-col1, col2 = st.columns(2)
-col1.metric("Líneas de Stock Únicas", f"{total_items}")
-col2.metric("Unidades Totales Disponibles", f"{total_stock:,.0f} Uds.")
-
-st.markdown("---")
-
-# Tabla de datos
-st.dataframe(
-    df_filtered.sort_values(by=COL_STOCK, ascending=False), # Ordenar por stock descendente
-    use_container_width=True,
-    column_config={
-        COL_SKU: st.column_config.TextColumn("SKU"),
-        COL_NOMBRE: st.column_config.TextColumn("Nombre Artículo", width="large"),
-        COL_BODEGA: st.column_config.TextColumn("Bodega"),
-        COL_STOCK: st.column_config.NumberColumn("Stock Disponible", format="%.0f"),
-    },
-    hide_index=True
-)
-
-# --- Botón de Descarga ---
-@st.cache_data
-def convert_df_to_csv(df):
-    # Función para convertir el DF a CSV en cache
-    return df.to_csv(index=False).encode('utf-8')
-
-csv_data = convert_df_to_csv(df_filtered)
-
-st.download_button(
-     label="📥 Descargar resultados (.csv)",
-     data=csv_data,
-     file_name="consulta_stock.csv",
-     mime="text/csv",
- )
+    if 'df_radar_results' in st.session_state:
+        st.download_button(
+            label="📥 Descargar Reporte (.csv)",
+            data=st.session_state.df_radar_results,
+            # --- MODIFICADO: Nombre de archivo más descriptivo ---
+            file_name=f"radar_inventario_{familia_sel.replace(' ', '_')}_{bodega_stock_sel}.csv",
+            mime="text/csv",
+            width='stretch'
+        )
+else:
+    st.info("Ajuste los parámetros y presione 'Generar Reporte de Radar' para comenzar.")
