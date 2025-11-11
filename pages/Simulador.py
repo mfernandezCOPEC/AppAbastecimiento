@@ -1,186 +1,205 @@
-# --- ARCHIVO: pages/3_📡_Radar.py ---
-# (NUEVA PÁGINA)
-
+# --- ARCHIVO: pages/1_📈_Simulador.py ---
+# (Modificado para selección múltiple de bodegas y mostrar tabla de consumo)
 import streamlit as st
 import pandas as pd
 import sys
 from pathlib import Path
-
 # --- Configuración del Path ---
+# (Necesario en CADA archivo de 'pages' para encontrar 'src')
 src_path = str(Path(__file__).resolve().parent.parent / "src")
 if src_path not in sys.path:
     sys.path.append(src_path)
 
-import config
-import radar_engine # <-- Importamos nuestro nuevo motor
-import ui_helpers # Para la barra lateral (si la tienes personalizada)
+import config         # Importa constantes
+import simulator      # Importa el motor de simulación
+import ui_helpers     # Importa las funciones de gráficos y métricas
+import altair as alt  # Importamos Altair
 
-# --- 1. Configuración de Página ---
-st.set_page_config(layout="wide", page_title="Radar de Inventario")
-st.title("Radar de Inventario 📡")
-st.markdown("Visión general del estado del inventario para priorizar acciones.")
-
-# (Opcional: si tienes la barra lateral personalizada, descomenta la línea de abajo)
-# ui_helpers.add_sidebar_navigation() 
-
-# --- 2. Verificar Carga de Datos ---
+# --- 1. LÓGICA DE LA PÁGINA DEL SIMULADOR ---
+# Verifica si los datos están cargados (deben haber sido cargados por app.py
 if 'data_loaded' not in st.session_state or not st.session_state.data_loaded:
     st.error("Los datos no se han cargado. Por favor, vuelva al Menú Principal e inténtelo de nuevo.")
     st.stop()
 
-# --- 3. Acceder a los Datos desde st.session_state ---
+# --- Configuración de Idioma y Título del Simulador ---
+ui_helpers.setup_locale() # Configura meses en español
+st.title("Simulador de Proyección de Inventario 📈")
+
+st.sidebar.markdown("---") # Separador
+
+# --- 2. Acceder a los Datos desde st.session_state ---
+# No los cargamos de nuevo, solo los referenciamos
 df_stock = st.session_state.df_stock
 df_oc = st.session_state.df_oc
 df_consumo = st.session_state.df_consumo
+# df_residencial no se usa en esta página, pero está disponible si se necesita
 
-# --- 4. Controles de Simulación (en la página principal) ---
-st.subheader("Parámetros del Reporte")
+# --- 3. Construcción de la Barra Lateral (Sidebar) ---
+st.sidebar.header("Configuración de Simulación")
 
-# --- NUEVO: Obtener lista de Familias ---
-try:
-    # Obtiene valores únicos, elimina NaNs/Nulos, ordena y añade "Todas"
-    familias_list = sorted(df_stock['Familia'].dropna().unique())
-    familias_list.insert(0, "Todas")
-except KeyError:
-    st.error("Error: La columna 'Familia' no se encontró en 'Stock.xlsx'. No se puede filtrar.")
-    familias_list = ["Todas"] # Permite que la app continúe
-# --- FIN NUEVO ---
+# --- Listas para selectores ---
+lista_skus_stock = df_stock['CodigoArticulo'].dropna().unique()
+lista_skus_consumo = df_consumo['CodigoArticulo'].dropna().unique()
+all_skus = sorted(list(set(lista_skus_stock) | set(lista_skus_consumo)))
 
-# Usamos los mismos selectores que el Simulador para consistencia
 lista_bodegas_stock = sorted(df_stock['CodigoBodega'].dropna().unique())
 lista_bodegas_consumo = sorted(df_consumo['BodegaDestino_Requerida'].dropna().unique())
 
-# --- MODIFICADO: 5 columnas para incluir el nuevo filtro ---
-col1, col2, col3, col4, col5 = st.columns(5)
-# --- FIN MODIFICADO ---
+# --- Requerimiento 2: Selector de SKU (usando ui_helper) ---
+opciones_selector_sku, mapa_nombres, default_index = ui_helpers.create_sku_options(all_skus, df_stock)
 
-with col1:
-    # --- NUEVO: Widget de filtro por Familia ---
-    familia_sel = st.selectbox(
-        "Familia (Categoría):",
-        familias_list,
-        index=0  # Por defecto selecciona "Todas"
-    )
-    # --- FIN NUEVO ---
-with col2:
-    bodega_stock_sel = st.selectbox(
-        "Bodega de Stock:",
-        lista_bodegas_stock,
-        index=lista_bodegas_stock.index('BF0001') if 'BF0001' in lista_bodegas_stock else 0
-    )
-with col3:
-    bodega_consumo_sel = st.selectbox(
-        "Bodega de Consumo:",
-        lista_bodegas_consumo,
-        index=lista_bodegas_consumo.index('Bodega de Proyectos RE') if 'Bodega de Proyectos RE' in lista_bodegas_consumo else 0
-    )
-with col4:
-    service_level_str = st.select_slider(
-        "Nivel de Servicio (para SS):",
-        options=list(config.Z_SCORE_MAP.keys()),
-        value="99%"
-    )
-    service_level_z = config.Z_SCORE_MAP[service_level_str]
-with col5: # --- MODIFICADO: movido a col5 ---
-    lead_time_days = st.number_input("Lead Time (Días) (para ROP):", min_value=1, max_value=120, value=90)
+sku_seleccionado_formateado = st.sidebar.selectbox(
+    "1. Seleccione un SKU (busque por código o nombre):",
+    opciones_selector_sku, 
+    index=default_index
+)
+sku_seleccionado = sku_seleccionado_formateado.split(" | ")[0]
 
-# --- 5. Botón de Ejecución ---
-if st.button("🚀 Generar Reporte de Radar", type="primary", width='stretch'):
-    
-    # --- NUEVO: Pre-filtrado de DataFrames por Familia ---
-    # Asignamos los DFs base de la sesión por defecto
-    df_stock_radar = df_stock
-    df_consumo_radar = df_consumo
-    df_oc_radar = df_oc
-
-    # Si se selecciona una familia específica, filtramos los 3 DFs
-    if familia_sel != "Todas":
-        try:
-            # 1. Filtra el DataFrame de stock por la familia seleccionada
-            df_stock_radar = df_stock[df_stock['Familia'] == familia_sel]
-            
-            if df_stock_radar.empty:
-                st.warning(f"No se encontraron SKUs de stock para la familia '{familia_sel}'.")
-                st.stop() # Detiene la ejecución si no hay nada que procesar
-
-            # 2. Obtiene la lista de SKUs que pertenecen a esa familia
-            #    (Asegúrate que la columna de SKU se llame 'SKU' en tus archivos)
-            skus_de_familia = df_stock_radar['SKU'].unique() 
-            
-            # 3. Filtra los otros DataFrames para que solo incluyan esos SKUs
-            df_consumo_radar = df_consumo[df_consumo['SKU'].isin(skus_de_familia)]
-            df_oc_radar = df_oc[df_oc['SKU'].isin(skus_de_familia)]
-            
-            st.info(f"Filtrando por {len(skus_de_familia)} SKUs de la familia '{familia_sel}'.")
-
-        except KeyError as e:
-            # Captura error si 'Familia' o 'SKU' no existen
-            st.error(f"Error: No se encontró la columna 'Familia' o 'SKU' en los DataFrames. Detalle: {e}")
-            st.stop()
-    # --- FIN NUEVO ---
-    
-    with st.spinner("Calculando KPIs para todos los SKUs... Esto puede tardar un momento."):
-        df_radar = radar_engine.run_full_radar_analysis(
-            # --- MODIFICADO: Usar DFs filtrados ---
-            df_stock_radar,
-            df_consumo_radar,
-            df_oc_radar,
-            # --- FIN MODIFICADO ---
-            bodega_stock_sel,
-            bodega_consumo_sel,
-            lead_time_days,
-            service_level_z
-        )
-
-    if df_radar.empty:
-        st.warning(f"No se encontraron datos para los parámetros seleccionados (Familia: {familia_sel}).")
-    else:
-        st.success(f"Reporte generado. Se analizaron {len(df_radar)} SKUs para la familia '{familia_sel}'.")
-        
-        # --- 6. Mostrar Resultados ---
-        st.subheader("Resultados del Radar")
-        
-        # Opciones de visualización
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            filtro_alerta = st.selectbox(
-                "Filtrar por Alerta:",
-                ["Todas", "Solo Alertas de Stock 🔴", "Solo Alertas Proyectadas 🔴"]
-            )
-        
-        df_display = df_radar.copy()
-        
-        # Aplicar filtros
-        if filtro_alerta == "Solo Alertas de Stock 🔴":
-            df_display = df_display[df_display["Alerta Stock (vs SS)"] == "🔴"]
-        elif filtro_alerta == "Solo Alertas Proyectadas 🔴":
-            df_display = df_display[df_display["Alerta Proy. (vs ROP)"] == "🔴"]
-
-        # Formatear el DataFrame para visualización
-        st.dataframe(
-            df_display.sort_values(by="DOS (Días)"), # Ordenar por el más crítico
-            width='stretch',
-            hide_index=True,
-            column_config={
-                "Stock Actual": st.column_config.NumberColumn(format="%.0f"),
-                "DOS (Días)": st.column_config.NumberColumn(format="%.1f"),
-                "Stock Proy. (en LT)": st.column_config.NumberColumn(format="%.0f"),
-                "ROP": st.column_config.NumberColumn(format="%.0f"),
-                "Pedido Sugerido": st.column_config.NumberColumn(format="%.0f"),
-                "Demanda Prom. Diaria": st.column_config.NumberColumn(format="%.2f"),
-            }
-        )
-        
-        # Guardar en sesión para descargar
-        st.session_state.df_radar_results = df_display.to_csv(index=False).encode('utf-8')
-
-    if 'df_radar_results' in st.session_state:
-        st.download_button(
-            label="📥 Descargar Reporte (.csv)",
-            data=st.session_state.df_radar_results,
-            file_name=f"radar_inventario_{familia_sel}_{bodega_stock_sel}.csv", # --- MODIFICADO: Nombre de archivo ---
-            mime="text/csv",
-            width='stretch'
-        )
+# --- (MODIFICADO) Selectores de Bodega con Default Específico ---
+# (MODIFICADO) Lógica para default de Bodega de Stock
+default_stock_val = 'BF0001'
+if default_stock_val in lista_bodegas_stock:
+    default_stock_selection = [default_stock_val]
+elif lista_bodegas_stock: # Si BF0001 no está, selecciona el primero de la lista
+    default_stock_selection = [lista_bodegas_stock[0]]
 else:
-    st.info("Ajuste los parámetros y presione 'Generar Reporte de Radar' para comenzar.")
+    default_stock_selection = [] # Lista vacía si no hay opciones
+
+bodega_stock_sel = st.sidebar.multiselect(
+    "2. Seleccione Bodega(s) de Stock:",
+    options=lista_bodegas_stock,
+    default=default_stock_selection # <-- Default cambiado
+)
+
+# (MODIFICADO) Lógica para default de Bodega de Consumo
+default_consumo_val = 'Bodega de Proyectos RE'
+if default_consumo_val in lista_bodegas_consumo:
+    default_consumo_selection = [default_consumo_val]
+elif lista_bodegas_consumo: # Si 'Bodega de Proyectos RE' no está, selecciona el primero
+    default_consumo_selection = [lista_bodegas_consumo[0]]
+else:
+    default_consumo_selection = [] # Lista vacía si no hay opciones
+
+bodega_consumo_sel = st.sidebar.multiselect(
+    "3. Seleccione Bodega(s) de Consumo:",
+    options=lista_bodegas_consumo,
+    default=default_consumo_selection # <-- Default cambiado
+)
+
+st.sidebar.markdown("---")
+
+# --- Parámetros de Simulación ---
+service_level_str = st.sidebar.select_slider(
+    "4. Nivel de Servicio (para Safety Stock):",
+    options=list(config.Z_SCORE_MAP.keys()),
+    value="99%"
+)
+service_level_z = config.Z_SCORE_MAP[service_level_str]
+
+lead_time_days = st.sidebar.number_input("5. Lead Time (Días):", min_value=1, max_value=120, value=90)
+
+dias_a_simular = st.sidebar.number_input("6. Días a Simular:", min_value=30, max_value=365, value=100)
+
+# --- 4. Disparador de Ejecución ---
+if st.sidebar.button("🚀 Ejecutar Simulación", type="primary"):
+    # (NUEVO) Verificación de que se seleccionó al menos una bodega
+    if not bodega_stock_sel:
+        st.error("Por favor, seleccione al menos una Bodega de Stock.")
+        st.stop()
+    if not bodega_consumo_sel:
+        st.error("Por favor, seleccione al menos una Bodega de Consumo.")
+        st.stop()
+
+    with st.spinner("Calculando simulación..."):
+
+        # --- A. Ejecutar Simulación ---
+        # (MODIFICADO) Pasamos las listas 'bodega_stock_sel' y 'bodega_consumo_sel'
+        df_sim, metrics, llegadas_map, df_llegadas_detalle = simulator.run_inventory_simulation(
+            sku_to_simulate=sku_seleccionado,
+            warehouse_code=bodega_stock_sel,
+            consumption_warehouse=bodega_consumo_sel,
+            df_stock_raw=df_stock,  # Pasando el df desde session_state
+            df_consumo_raw=df_consumo, # Pasando el df desde session_state
+            df_oc_raw=df_oc,       # Pasando el df desde session_state
+            simulation_days=dias_a_simular,
+            lead_time_days=lead_time_days,
+            service_level_z=service_level_z
+        )
+
+        # --- B. Mostrar Métricas ---
+        st.subheader(f"Resultados para: {sku_seleccionado}")
+        st.caption(f"Nombre: {mapa_nombres.get(sku_seleccionado, 'N/A')}")
+        ui_helpers.display_metrics(metrics, lead_time_days, service_level_z)
+
+        # --- C. Mostrar Recomendación de Pedido (Refactorizada) ---
+        st.markdown("---") # Separador
+        ui_helpers.display_order_recommendation(metrics, llegadas_map, df_sim, lead_time_days)
+
+        # --- D. Mostrar Detalle de Llegadas ---
+        st.markdown("---") # Separador
+        ui_helpers.display_arrival_details(df_llegadas_detalle)
+        st.markdown("---") # Separador
+
+        # --- E. Generar y Mostrar Gráfico ---
+        sku_name = mapa_nombres.get(sku_seleccionado, sku_seleccionado)
+        fig = ui_helpers.generate_simulation_plot(
+            df_sim, 
+            metrics, 
+            llegadas_map, 
+            sku_name, 
+            dias_a_simular
+        )
+        st.altair_chart(fig, use_container_width=True)
+
+        # --- F. Mostrar Tabla Fin de Mes (Req. 3) ---
+        df_tabla_resultados = ui_helpers.prepare_end_of_month_table(df_sim)
+        st.subheader("Stock Simulado a Fin de Mes")
+        st.dataframe(df_tabla_resultados, width='stretch', hide_index=True)
+
+        # --- G. Mostrar Tabla de Consumo Utilizada ---
+        st.markdown("---")
+        with st.expander("Ver datos de consumo utilizados para esta simulación"):
+
+            st.subheader(f"Historial de Consumo para {sku_seleccionado}")
+            st.caption(f"Filtrado por bodegas: {', '.join(bodega_consumo_sel)}")
+
+            # Re-filtramos los datos de consumo tal como lo hace el simulador
+            # (El df_consumo global ya fue filtrado por fecha en data_loader.py)
+            df_consumo_usado = df_consumo[
+                (df_consumo['CodigoArticulo'] == sku_seleccionado) &
+                (df_consumo['BodegaDestino_Requerida'].isin(bodega_consumo_sel))
+            ].copy()
+
+            if df_consumo_usado.empty:
+                st.warning("No se encontró historial de consumo para este SKU y bodegas.")
+            else:
+                # --- INICIO DE LA MODIFICACIÓN ---
+                # Limpiamos y seleccionamos columnas relevantes para mostrar
+                columnas_a_mostrar = [
+                    'FechaSolicitud', 
+                    'CantidadSolicitada', 
+                    'BodegaDestino_Requerida',
+                    'SolicitadoPor',         # <-- Columna añadida
+                    'CodigoProyecto',         # <-- Columna añadida
+                    'NombreProyecto',         # <-- Columna añadida
+                    'CodigoUnidadNegocio',    # <-- Columna añadida
+                    'CeCo' # Este es un supuesto, podría no estar
+                ]
+                # --- FIN DE LA MODIFICACIÓN ---
+                # Filtramos solo columnas que realmente existen en el DataFrame
+                columnas_existentes = [col for col in columnas_a_mostrar if col in df_consumo_usado.columns]
+                df_display_consumo = df_consumo_usado[columnas_existentes].sort_values(by='FechaSolicitud', ascending=False)
+                st.dataframe(df_display_consumo, use_container_width=True)
+                # Mostramos un resumen del consumo mensual
+                st.subheader("Resumen de Consumo Mensual (Base del Cálculo)")
+                try:
+                    df_consumo_usado['FechaSolicitud'] = pd.to_datetime(df_consumo_usado['FechaSolicitud'])
+                    consumo_mensual = df_consumo_usado.set_index('FechaSolicitud')['CantidadSolicitada'].resample('MS').sum().reset_index()
+                    consumo_mensual.columns = ["Mes", "Total Solicitado"]
+                    st.dataframe(consumo_mensual.sort_values(by="Mes", ascending=False), use_container_width=True)
+                except Exception as e:
+                    st.error(f"No se pudo generar el resumen mensual: {e}")
+
+else:
+    # Mensaje de bienvenida inicial
+    st.info("Ajuste los parámetros en la barra lateral y presione 'Ejecutar Simulación'")
