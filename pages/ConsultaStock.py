@@ -27,7 +27,7 @@ except ImportError:
 st.set_page_config(layout="wide", page_title="Consulta de Stock")
 ui_helpers.setup_locale() # Configura meses en español
 
-st.title("Consulta de Inventario en Bodega 📦")
+st.title("Consulta de Inventario en Bodega")
 st.markdown("Busque y filtre el stock disponible por SKU, nombre o bodega.")
 
 if 'data_loaded' not in st.session_state or not st.session_state.data_loaded:
@@ -37,7 +37,7 @@ if 'data_loaded' not in st.session_state or not st.session_state.data_loaded:
 # --- 2. Acceder y Preparar los Datos ---
 # Columnas que esperamos encontrar. AJUSTA ESTOS NOMBRES SI SON DIFERENTES.
 COL_SKU = 'CodigoArticulo'
-COL_NOMBRE = 'NombreArticulo' # Esta es una suposición, ajústala si es necesario.
+COL_NOMBRE = 'NombreArticulo' #df stock
 COL_BODEGA = 'CodigoBodega'
 COL_STOCK = 'DisponibleParaPrometer'
 
@@ -137,17 +137,13 @@ if hide_zero_stock:
     df_filtered = df_filtered[df_filtered[COL_STOCK] > 0]
 
 # --- 5. Mostrar Resultados ---
-
 total_items = len(df_filtered)
 total_stock = df_filtered[COL_STOCK].sum()
-
 st.subheader(f"Resultados de la Búsqueda ({total_items} líneas encontradas)")
-
 # Métricas
 col1, col2 = st.columns(2)
 col1.metric("Líneas de Stock Únicas", f"{total_items}")
 col2.metric("Unidades Totales Disponibles", f"{total_stock:,.0f} Uds.")
-
 st.markdown("---")
 
 # Tabla de datos
